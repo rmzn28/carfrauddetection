@@ -69,32 +69,36 @@ else:
     st.stop()
 
 # Model Parameters
-st.sidebar.subheader("Model Settings")
-contamination = st.sidebar.slider("Anomaly Sensitivity", 0.001, 0.05, 0.01, 0.001, help="Higher = More strict (Flags more cars).")
+# st.sidebar.subheader("Model Settings")
+# label = "Max Price Deviation (%)"
+# threshold_slider = st.sidebar.slider(label, 10, 50, 20, 5, help="Flag cars as suspicious if their price differs from the AI prediction by more than this %.")
+threshold = 0.25 # Hardcoded to 25% as requested
+# contamination = st.sidebar.slider("Anomaly Sensitivity", 0.001, 0.05, 0.01, 0.001, help="Higher = More strict (Flags more cars).")
 n_estimators = 100 # Fixed to improve speed, or make optional
 
 # --- Main App Logic ---
 
 # Caching the Heavy Computation
 @st.cache_data(show_spinner=False)
-def train_and_predict(df, contamination_rate):
-    # Preprocess
+def train_and_predict(df, threshold_val):
+    # Preprocess - EXCLUDE PRICE from features as we want to predict it!
     preprocessor = DataPreprocessor()
-    X_scaled, df_display, features = preprocessor.fit_transform(df)
+    X_scaled, df_display, features = preprocessor.fit_transform(df, exclude_cols=['Price'])
+    y_actual = df['Price'].values
     
     # Train
-    model = CarFraudDetector(contamination=contamination_rate, n_estimators=100)
-    model.train(X_scaled, feature_names=features)
+    model = CarFraudDetector(threshold=threshold_val, n_estimators=50) # Faster n_estimators for UI
+    model.train(X_scaled, y_actual, feature_names=features)
     
     # Predict
-    preds, scores = model.predict(X_scaled)
+    preds, scores = model.predict(X_scaled, y_actual)
     
     # Results - Use the df_display which has original text columns!
     results = add_predictions_to_df(df_display, preds, scores)
     return results
 
 with st.spinner('Analyzing market data... (This runs once)'):
-    results = train_and_predict(df, contamination)
+    results = train_and_predict(df, threshold)
 
 # --- Layout Architecture ---
 
@@ -124,10 +128,12 @@ with main_tab1:
     col2.metric("Suspicious Listings", f"{n_anomalies}", delta="-Flagged" if n_anomalies > 0 else "Clean")
 
     if n_anomalies > 0:
-        diff = avg_price_fraud - avg_price_normal
-        col3.metric("Avg Fraud Price", f"${avg_price_fraud:,.0f}", f"{diff:+,.0f} vs Normal")
+        # diff = avg_price_fraud - avg_price_normal
+        # col3.metric("Avg Fraud Price", f"${avg_price_fraud:,.0f}", f"{diff:+,.0f} vs Normal")
+        col3.empty() # Removed as requested
     else:
-        col3.metric("Avg Market Price", f"${avg_price_normal:,.0f}")
+        # col3.metric("Avg Market Price", f"${avg_price_normal:,.0f}")
+        col3.empty()
 
     # 3. Visualizations Sub-Tabs
     sub_tab1, sub_tab2, sub_tab3 = st.tabs(["📉 Price Analysis", "🔍 Inspection Lists", "📊 Stats"])
@@ -165,7 +171,7 @@ with main_tab1:
                 fraud_df = view_df[view_df['Is_Potential_Fraud']].sort_values('Anomaly_Score')
                 st.dataframe(
                     fraud_df[['Brand', 'Model', 'Year', 'Trim', 'Price', 'Mileage', 'Anomaly_Score']].head(1000),
-                    use_container_width=True
+                    width="stretch"
                 )
                 st.caption("Showing top 1,000 most suspicious records.")
             else:
@@ -176,7 +182,7 @@ with main_tab1:
             if len(normal_df) > 0:
                  st.dataframe(
                     normal_df[['Brand', 'Model', 'Year', 'Trim', 'Price', 'Mileage']].sample(min(1000, len(normal_df))),
-                    use_container_width=True
+                    width="stretch"
                 )
                  st.caption("Showing random 1,000 normal records.")
             else:
@@ -332,6 +338,21 @@ with main_tab2:
     else:
         p_trim = "Unknown"
 
+    # Data Count Check for Warning
+    if p_trim != "Unknown" and p_trim != "Standard":
+        # Calculate how many examples exist for this specific configuration
+        # Note: We use results (which has filtered/cleaned data) or df? 
+        # Using df is safer to know TOTAL existence.
+        trim_subset = df[
+            (df['Brand'] == p_brand) & 
+            (df['Model'] == p_model) & 
+            (df['Trim'] == p_trim)
+        ]
+        trim_count = len(trim_subset)
+        
+        if trim_count < 30:
+            st.warning(f"⚠️ Low Data Volume: Only {trim_count} sales found for '{p_model} {p_trim}' in dataset. Prediction accuracy may be lower due to scarcity.")
+
     col_p4, col_p5 = st.columns(2)
     
     # 4. Year Selection (Dynamic Check)
@@ -349,8 +370,9 @@ with main_tab2:
     p_mileage = col_p5.number_input("Mileage", min_value=0, max_value=500000, value=50000, step=1000, key="calc_mileage")
     
     if st.button("Calculate Fair Price", type="primary"):
-        # Train on clean data only
-        clean_data_for_training = results[~results['Is_Potential_Fraud']]
+        # Train on all valid data (Including high-priced "anomalies" which are valid for price estimation)
+        # We only remove extremely low prices that might be errors/scams impacting the regression
+        clean_data_for_training = results[results['Price'] > 500]
         
         # 1. Train Regressor on the fly
         from model import CarPricePredictor
@@ -394,4 +416,4 @@ with main_tab2:
             predicted_price = predictor.predict(X_test)[0]
             
             st.success(f"Estimated Fair Price: **${predicted_price:,.0f}**")
-            st.caption(f"Based on verified normal listings.")
+            st.caption(f"Based on {len(clean_data_for_training):,} market listings.")
