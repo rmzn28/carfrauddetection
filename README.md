@@ -8,7 +8,7 @@ A comprehensive Streamlit web application powered by Machine Learning to detect 
 ## 🌟 Features
 
 ### 🔍 Fraud Detection (Anomaly Detection)
-- **Algorithm:** Uses **Isolation Forest** to identify listings that deviate significantly from market norms.
+- **Algorithm:** Uses **Random Forest Regression** to identify listings that deviate significantly from market norms.
 - **Features Analyzed:** Price, Mileage, Model Year, Brand, Trim, and Body Type.
 - **Smart Logic:** Flags cars that are "Too Good To Be True" (e.g., very low price for low mileage) or suspicious outliers.
 
