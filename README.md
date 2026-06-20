@@ -2,8 +2,7 @@
 
 A comprehensive Streamlit web application powered by Machine Learning to detect potentially fraudulent car listings and estimate fair market prices.
 
-![Dashboard Preview](https://via.placeholder.com/800x400?text=Dashboard+Preview) 
-*(Note: Replace with an actual screenshot)*
+
 
 ## 🌟 Features
 
